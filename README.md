@@ -130,20 +130,22 @@ Remote mode remains the default.
 
 - Linux x64 (arm64 support is scaffolded but not yet validated end-to-end)
 - Node.js 26.5.x (see `.node-version`)
-- Git LFS
+- Git LFS (`git lfs pull` — required so the preserved macOS DMG is available)
+- `p7zip-full` (`7z`) for extracting the checksum-pinned `app.asar` from the research-archive DMG during Linux bootstrap
 - `unzip` for Electron bootstrap extraction
 - Docker (optional, recommended for the local sandbox — works especially well on native Linux hosts)
-- A checksum-pinned upstream `app.asar` payload (see below)
 
-The Linux bootstrap downloads the official Electron 42.1.0 binary and expects the
-pinned upstream renderer/runtime archive separately. Populate one of:
+On a fresh Linux host, `npm run bootstrap` automatically extracts the pinned
+`app.asar` and `app.asar.unpacked` from
+`research-archives/original/0.18.0/macos-arm64/Grok_Bot_0.18.0.dmg` when the
+payload cache is empty. You can still override with:
 
 - `.cache/payload/app.asar` and `.cache/payload/app.asar.unpacked`
 - `GROK_BOT_018_ASAR` (and optionally `GROK_BOT_018_ASAR_UNPACKED`)
 
-The easiest path is to run `npm run bootstrap` once on macOS, then copy the
-extracted `app.asar` and `app.asar.unpacked` from the cached runtime into
-`.cache/payload/` on your Linux machine.
+The macOS DMG archive is the source of truth for the checksum
+(`6665408168466f9cacc6087e917890c17f59d2e2e9c2404a5c4a59ad79c1de58`). Do not
+change that hash — populate the real payload instead.
 
 ## Quick start
 
@@ -171,6 +173,7 @@ git lfs pull
 npm ci
 
 # Populate .cache/payload/ from a macOS bootstrap, or set GROK_BOT_018_ASAR.
+# On a fresh clone, git lfs pull is enough — bootstrap extracts from the archived DMG.
 npm run bootstrap
 npm run check
 npm run package:linux

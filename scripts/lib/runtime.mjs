@@ -148,25 +148,33 @@ export async function resolvePayloadUnpackedPath(asarPath) {
 }
 
 export async function installLinuxPayload(electronDir, { asarPath, unpackedPath } = {}) {
-  const archive = asarPath ?? await resolvePayloadAsarPath();
-  const unpacked = unpackedPath ?? await resolvePayloadUnpackedPath(archive);
+  const archive = path.resolve(asarPath ?? await resolvePayloadAsarPath());
+  const unpacked = path.resolve(unpackedPath ?? await resolvePayloadUnpackedPath(archive));
   const layout = getRuntimeLayout(electronDir);
   await mkdir(layout.resources, { recursive: true });
-  await cp(archive, layout.asar);
-  await rm(layout.unpacked, { recursive: true, force: true });
-  await cp(unpacked, layout.unpacked, {
-    recursive: true,
-    dereference: false,
-    preserveTimestamps: true,
-  });
+  if (archive !== path.resolve(layout.asar)) {
+    await cp(archive, layout.asar);
+  }
+  if (unpacked !== path.resolve(layout.unpacked)) {
+    await rm(layout.unpacked, { recursive: true, force: true });
+    await cp(unpacked, layout.unpacked, {
+      recursive: true,
+      dereference: false,
+      preserveTimestamps: true,
+    });
+  }
   await mkdir(path.dirname(cachedPayloadAsar), { recursive: true });
-  await cp(archive, cachedPayloadAsar);
-  await rm(cachedPayloadUnpacked, { recursive: true, force: true });
-  await cp(unpacked, cachedPayloadUnpacked, {
-    recursive: true,
-    dereference: false,
-    preserveTimestamps: true,
-  });
+  if (archive !== path.resolve(cachedPayloadAsar)) {
+    await cp(archive, cachedPayloadAsar);
+  }
+  if (unpacked !== path.resolve(cachedPayloadUnpacked)) {
+    await rm(cachedPayloadUnpacked, { recursive: true, force: true });
+    await cp(unpacked, cachedPayloadUnpacked, {
+      recursive: true,
+      dereference: false,
+      preserveTimestamps: true,
+    });
+  }
   return { asarPath: archive, unpackedPath: unpacked };
 }
 

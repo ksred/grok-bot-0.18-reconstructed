@@ -51,7 +51,7 @@ if (asarSha256 === upstreamAsarSha256) {
   console.warn("Warning: packaged asar still matches the pristine upstream hash; expected a reconstructed fidelity build.");
 }
 
-const listing = new Set(listPackage(artifacts.asarPath).map((entry) => `/${entry}`));
+const listing = new Set(listPackage(artifacts.asarPath));
 for (const required of [
   "/dist/electron-main/main.cjs",
   "/dist/host/host-main.cjs",

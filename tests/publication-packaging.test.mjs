@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -146,6 +146,24 @@ test("bootstrap runtime exposes a Linux branch without removing macOS DMG flow",
   assert.match(source, /async function bootstrapDarwin/);
   assert.match(source, /requireDarwinTool\("hdiutil"\)/);
   assert.match(source, /process\.platform === "linux"/);
+  assert.match(source, /cachePayloadFromDmg/);
+});
+
+test("archived macOS DMG yields the checksum-pinned app.asar", async () => {
+  const { extractPayloadFromDmg } = await import("../scripts/lib/extract-payload-from-dmg.mjs");
+  const { rm } = await import("node:fs/promises");
+  const dmg = path.join(repoRoot, "research-archives", "original", "0.18.0", "macos-arm64", "Grok_Bot_0.18.0.dmg");
+  await access(dmg);
+  const metadata = await stat(dmg);
+  if (metadata.size < 1_000_000) {
+    assert.fail("macos-arm64/Grok_Bot_0.18.0.dmg requires git lfs pull");
+  }
+  const extracted = await extractPayloadFromDmg(dmg);
+  try {
+    assert.equal(extracted.sha256, "6665408168466f9cacc6087e917890c17f59d2e2e9c2404a5c4a59ad79c1de58");
+  } finally {
+    await rm(extracted.extractRoot, { recursive: true, force: true });
+  }
 });
 
 test("packaged artifact resolution supports Linux Electron directories", async () => {

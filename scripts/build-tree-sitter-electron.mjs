@@ -57,11 +57,14 @@ for (const packageName of packages) {
 const rebuiltNodes = [];
 for (const packageName of packages) {
   const buildRoot = path.join(repoRoot, "node_modules", packageName, "build");
-  for (const entry of await readdir(buildRoot, { withFileTypes: true })) {
-    if (entry.isFile() && entry.name.endsWith(".node")) {
-      rebuiltNodes.push(path.join(buildRoot, entry.name));
+  async function collect(directory) {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const target = path.join(directory, entry.name);
+      if (entry.isDirectory()) await collect(target);
+      else if (entry.isFile() && entry.name.endsWith(".node")) rebuiltNodes.push(target);
     }
   }
+  await collect(buildRoot);
 }
 if (rebuiltNodes.length === 0) {
   throw new Error(`No rebuilt .node binaries found for ${packages.join(", ")}`);

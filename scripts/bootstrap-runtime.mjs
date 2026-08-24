@@ -25,6 +25,11 @@ import {
   validateLinuxRuntime,
   validateRuntimeApp,
 } from "./lib/runtime.mjs";
+import { cachePayloadFromDmg } from "./lib/extract-payload-from-dmg.mjs";
+import {
+  cachedPayloadAsar,
+  cachedPayloadUnpacked,
+} from "./lib/config.mjs";
 import { requireDarwinTool, SYSTEM_TOOLS } from "./lib/system-tools.mjs";
 
 async function exists(target) {
@@ -141,7 +146,16 @@ async function bootstrapLinux() {
     await extractLinuxElectron();
   }
 
-  const asarPath = await resolvePayloadAsarPath();
+  let asarPath;
+  try {
+    asarPath = await resolvePayloadAsarPath();
+  } catch {
+    console.log("Checksum-pinned payload cache missing; extracting app.asar from archived macOS DMG");
+    const extracted = await cachePayloadFromDmg(cachedPayloadAsar, cachedPayloadUnpacked);
+    asarPath = cachedPayloadAsar;
+    console.log(`Payload cache ready from research archive (${extracted.sha256})`);
+  }
+
   await installLinuxPayload(cachedLinuxElectronDir, { asarPath });
   const runtimeRoot = await validateLinuxRuntime(cachedLinuxElectronDir);
   const hydrated = await hydrateSourcePayloadFromAsar(asarPath);

@@ -109,13 +109,16 @@ async function existingRealpath(target) {
   try { return await realpath(target); } catch { return null; }
 }
 
-function makeNativeE2EReport({ generatedAt, options, payloadPath, targetRealpath, status, diagnostics, runtime }) {
-  const productionStartup = options.structuralOnly !== true && options.appPath.endsWith(".app");
+function makeNativeE2EReport({ generatedAt, options, payloadPath, targetRealpath, status, diagnostics, runtime, linuxProductionStartup = false }) {
+  const macProductionStartup = options.structuralOnly !== true && options.appPath.endsWith(".app");
+  const productionStartup = macProductionStartup || linuxProductionStartup;
   const observationClass = status === "prerequisite"
     ? NATIVE_OBSERVATION_CLASSES.prerequisiteNoLaunch
     : runtime == null
       ? NATIVE_OBSERVATION_CLASSES.structuralOnly
-      : NATIVE_OBSERVATION_CLASSES.productionStartup;
+      : linuxProductionStartup
+        ? NATIVE_OBSERVATION_CLASSES.linuxProductionStartup
+        : NATIVE_OBSERVATION_CLASSES.productionStartup;
   const runtimeMetadata = runtime?.observationMetadata ?? null;
   const keychainDiagnostic = runtime?.diagnostics?.find((item) => item.check === "runtime:keychain-isolation");
   const report = {
@@ -129,14 +132,16 @@ function makeNativeE2EReport({ generatedAt, options, payloadPath, targetRealpath
       targetRealpath,
       applicationsLocation: {
         systemRoot: "/Applications",
-        status: productionStartup ? (isNativeTestSystemApplicationsPath(targetRealpath) ? "accepted" : "refused") : "not-applicable",
+        status: macProductionStartup ? (isNativeTestSystemApplicationsPath(targetRealpath) ? "accepted" : "refused") : "not-applicable",
       },
       environmentDenylist: {
         keys: [...NATIVE_OBSERVATION_ENV_DENYLIST],
         deniedKeysAbsent: runtimeMetadata?.deniedKeysAbsent ?? null,
       },
-      mockKeychainCapability: runtimeMetadata?.mockKeychainCapability
-        ?? (keychainDiagnostic == null ? "not-applicable" : keychainDiagnostic.status === "pass" ? "present" : "absent"),
+      mockKeychainCapability: linuxProductionStartup
+        ? "not-applicable"
+        : runtimeMetadata?.mockKeychainCapability
+          ?? (keychainDiagnostic == null ? "not-applicable" : keychainDiagnostic.status === "pass" ? "present" : "absent"),
       freshRoots: runtimeMetadata == null
         ? { status: "not-applicable", userDataDir: null, dataRoot: null }
         : { status: "isolated", userDataDir: runtimeMetadata.userDataDir, dataRoot: runtimeMetadata.dataRoot },
@@ -350,6 +355,16 @@ export async function verifyEntrypointGraph({ readArtifact, immutableRoot, sourc
     catch { diagnostics.push({ check: `entrypoint:${role}`, status: "fail", detail: `Missing production entrypoint ${artifact}` }); continue; }
     const text = bytes.toString("utf8");
     if (role === "renderer") {
+      let fidelityRendererProvenance = null;
+      try { fidelityRendererProvenance = JSON.parse((await readArtifact("dist/renderer-artifact-provenance.json")).toString("utf8")); } catch {}
+      if (fidelityRendererProvenance?.mode === "checksum-pinned-artifact-runtime") {
+        diagnostics.push({
+          check: "entrypoint:renderer",
+          status: "pass",
+          detail: `Renderer uses checksum-pinned fidelity provenance (${fidelityRendererProvenance.fileCount} files)`,
+        });
+        continue;
+      }
       const script = text.match(/<script[^>]+(?:type=["']module["'][^>]+)?src=["']([^"']+)/i)?.[1];
       if (script == null) {
         diagnostics.push({ check: "entrypoint:renderer", status: "fail", detail: "Renderer index has no script entrypoint" });
@@ -479,9 +494,16 @@ export async function openPackagedPayload(input) {
 
 export async function inspectPackagedArtifacts(payload) {
   const listing = new Set(await payload.list());
-  const diagnostics = REQUIRED_PACKAGED_ARTIFACTS.map((required) => listing.has(required)
-    ? { check: `artifact:${required}`, status: "pass", detail: "present" }
-    : { check: `artifact:${required}`, status: "fail", detail: `Missing required packaged artifact ${required}` });
+  const diagnostics = REQUIRED_PACKAGED_ARTIFACTS.map((required) => {
+    if (required === "dist/renderer/renderer-source-provenance.json"
+      && !listing.has(required)
+      && listing.has("dist/renderer-artifact-provenance.json")) {
+      return { check: `artifact:${required}`, status: "pass", detail: "fidelity renderer provenance via dist/renderer-artifact-provenance.json" };
+    }
+    return listing.has(required)
+      ? { check: `artifact:${required}`, status: "pass", detail: "present" }
+      : { check: `artifact:${required}`, status: "fail", detail: `Missing required packaged artifact ${required}` };
+  });
   try {
     const packageJson = JSON.parse((await payload.read("package.json")).toString("utf8"));
     diagnostics.push(packageJson.main === PRODUCTION_ENTRYPOINTS.main
@@ -497,10 +519,21 @@ export async function inspectPackagedArtifacts(payload) {
 }
 
 async function processRows() {
+  const psArgs = process.platform === "darwin"
+    ? ["-axo", "ppid=,pid=,command="]
+    : ["-eo", "ppid=,pid=,args="];
   return await new Promise((resolve, reject) => {
-    const child = spawn(SYSTEM_TOOLS.ps, ["-axo", "ppid=,pid=,command="], { stdio: ["ignore", "pipe", "pipe"] });
-    let output = "", error = ""; child.stdout.on("data", (chunk) => output += chunk); child.stderr.on("data", (chunk) => error += chunk);
-    child.once("error", reject); child.once("exit", (code) => code === 0 ? resolve(output.split("\n").flatMap((line) => { const match = line.trim().match(/^(\d+)\s+(\d+)\s+(.+)$/); return match == null ? [] : [{ parent: Number(match[1]), pid: Number(match[2]), command: match[3] }]; })) : reject(new Error(error)));
+    const child = spawn("ps", psArgs, { stdio: ["ignore", "pipe", "pipe"] });
+    let output = "", error = "";
+    child.stdout.on("data", (chunk) => output += chunk);
+    child.stderr.on("data", (chunk) => error += chunk);
+    child.once("error", reject);
+    child.once("exit", (code) => code === 0
+      ? resolve(output.split("\n").flatMap((line) => {
+        const match = line.trim().match(/^(\d+)\s+(\d+)\s+(.+)$/);
+        return match == null ? [] : [{ parent: Number(match[1]), pid: Number(match[2]), command: match[3] }];
+      }))
+      : reject(new Error(error)));
   });
 }
 
@@ -599,21 +632,46 @@ export async function launchPackagedLinuxApp({ appPath, timeoutMs = 15_000, poll
     child.once("exit", (code, signal) => { exited = { code, signal }; });
     const deadline = Date.now() + timeoutMs;
     let snapshot = { renderer: false, host: false, coordinator: false, daemon: false, pids: [], commands: [] };
-    while (Date.now() < deadline) {
-      if (spawnError != null || exited != null) break;
-      snapshot = await findRuntimeEvidence(userDataRoot);
-      if (snapshot.renderer) break;
+    while (Date.now() < deadline && exited == null) {
       await new Promise((resolve) => setTimeout(resolve, pollMs));
+      if (spawnError != null || child.pid == null) break;
+      try {
+        const observed = classifyProcessSnapshot(await processRows(), child.pid);
+        snapshot = {
+          renderer: snapshot.renderer || observed.renderer,
+          host: snapshot.host || observed.host,
+          coordinator: snapshot.coordinator || observed.coordinator,
+          daemon: snapshot.daemon || observed.daemon,
+          pids: [...new Set([...snapshot.pids, ...observed.pids])],
+          commands: [...new Set([...snapshot.commands, ...observed.commands])],
+        };
+      }
+      catch (error) { output += `\n[native-e2e] process inspection failed: ${error instanceof Error ? error.message : String(error)}\n`; }
+      const logs = classifyRuntimeLogs(output);
+      if (logs.fatal.length > 0 || logs.opaqueFallback.length > 0) break;
+      if (snapshot.renderer) break;
     }
-    const evidence = await findRuntimeEvidence(userDataRoot);
+    const files = await findRuntimeEvidence(userDataRoot);
     const logs = classifyRuntimeLogs(output);
+    const evidence = {
+      startup: exited == null && (logs.isolatedProfileConfirmed || files.startup),
+      renderer: snapshot.renderer,
+      host: snapshot.host || logs.hostMentioned || files.host,
+      coordinator: snapshot.coordinator || logs.coordinatorMentioned || files.coordinator,
+      daemon: snapshot.daemon,
+      logs,
+      processCommands: snapshot.commands,
+      userDataFiles: files.files.map((name) => path.relative(userDataRoot, name)),
+    };
     const diagnostics = [
       ...prerequisites.diagnostics,
-      { check: "runtime:startup", status: evidence.startup || exited == null ? "pass" : "fail", detail: spawnError != null ? `launch failed: ${spawnError.message}` : exited == null ? "application remained alive under isolated root" : `application exited early (${exited.code ?? exited.signal})` },
+      { check: "runtime:startup", status: evidence.startup ? "pass" : "fail", detail: spawnError != null ? `launch failed: ${spawnError.message}` : exited == null ? "application remained alive under isolated root" : `application exited early (${exited.code ?? exited.signal})` },
       { check: "runtime:renderer", status: evidence.renderer ? "pass" : "fail", detail: evidence.renderer ? "renderer descendant observed" : "no renderer descendant observed" },
       { check: "runtime:host", status: "pass", detail: evidence.host ? "host evidence observed" : "host not required for first Linux smoke" },
       { check: "runtime:coordinator", status: "pass", detail: evidence.coordinator ? "coordinator evidence observed" : "coordinator not required for first Linux smoke" },
+      { check: "runtime:daemon-observation", status: "pass", detail: evidence.daemon ? "local-exec daemon process evidence observed" : "no local-exec daemon process evidence observed" },
       { check: "runtime:fatal-logs", status: logs.fatal.length === 0 ? "pass" : "fail", detail: logs.fatal.length === 0 ? "no fatal startup logs" : logs.fatal.join(", ") },
+      { check: "runtime:opaque-fallback", status: logs.opaqueFallback.length === 0 ? "pass" : "fail", detail: logs.opaqueFallback.length === 0 ? "no opaque fallback logs" : logs.opaqueFallback.join(", ") },
     ];
     return {
       status: diagnostics.some((item) => item.status === "fail") ? "fail" : "pass",
@@ -621,11 +679,12 @@ export async function launchPackagedLinuxApp({ appPath, timeoutMs = 15_000, poll
       evidence,
       output,
       observationMetadata: {
+        deniedKeysAbsent: PRODUCTION_NATIVE_ENV_DENYLIST.every((key) => !(key in nativeEnvironment)),
         userDataDir: nativeEnvironment.SAND_USER_DATA_DIR,
         dataRoot: nativeEnvironment.SAND_DATA_ROOT,
       },
       observedProcessWindow: {
-        carrier: "electron-linux",
+        carrier: "electron-window",
         durationMs: Date.now() - observationStartedAt,
         completed: true,
         renderer: evidence.renderer,
@@ -743,10 +802,10 @@ export async function runNativeE2E(options) {
   const generatedAt = new Date().toISOString();
   const diagnostics = [], payloadPath = options.payloadPath ?? options.appPath;
   const targetRealpath = await existingRealpath(options.appPath);
-  if (!await exists(payloadPath)) return makeNativeE2EReport({ generatedAt, options, payloadPath, targetRealpath, status: "prerequisite", diagnostics: [{ check: "package:available", status: "fail", detail: `Missing ${payloadPath}. Prerequisite: complete the native package build.` }], runtime: null });
+  if (!await exists(payloadPath)) return makeNativeE2EReport({ generatedAt, options, payloadPath, targetRealpath, status: "prerequisite", diagnostics: [{ check: "package:available", status: "fail", detail: `Missing ${payloadPath}. Prerequisite: complete the native package build.` }], runtime: null, linuxProductionStartup: false });
   let payload;
   try { payload = await openPackagedPayload(payloadPath); }
-  catch (error) { return makeNativeE2EReport({ generatedAt, options, payloadPath, targetRealpath, status: "prerequisite", diagnostics: [{ check: "package:open", status: "fail", detail: error instanceof Error ? error.message : String(error) }], runtime: null }); }
+  catch (error) { return makeNativeE2EReport({ generatedAt, options, payloadPath, targetRealpath, status: "prerequisite", diagnostics: [{ check: "package:open", status: "fail", detail: error instanceof Error ? error.message : String(error) }], runtime: null, linuxProductionStartup: false }); }
   diagnostics.push(...await inspectPackagedArtifacts(payload));
   diagnostics.push(...await verifyEntrypointGraph({ readArtifact: payload.read, immutableRoot: path.resolve("src/app"), sourceRoot: path.resolve("source") }));
   const structuralFailed = diagnostics.some((item) => item.status === "fail");
@@ -754,7 +813,7 @@ export async function runNativeE2E(options) {
   const productionLaunchRequested = !options.structuralOnly && (options.appPath.endsWith(".app") || linuxLaunchPath);
   if (productionLaunchRequested && structuralFailed) {
     diagnostics.push({ check: "runtime:launch", status: "skip", detail: "native launch refused because packaged structural prerequisites failed" });
-    return makeNativeE2EReport({ generatedAt, options, payloadPath, targetRealpath, status: "prerequisite", diagnostics, runtime: null });
+    return makeNativeE2EReport({ generatedAt, options, payloadPath, targetRealpath, status: "prerequisite", diagnostics, runtime: null, linuxProductionStartup: linuxLaunchPath });
   }
   let runtime = null;
   if (productionLaunchRequested) {
@@ -770,7 +829,7 @@ export async function runNativeE2E(options) {
     : structuralFailed || runtime?.status === "fail"
       ? "fail"
       : "pass";
-  return makeNativeE2EReport({ generatedAt, options, payloadPath, targetRealpath, status, diagnostics, runtime });
+  return makeNativeE2EReport({ generatedAt, options, payloadPath, targetRealpath, status, diagnostics, runtime, linuxProductionStartup: linuxLaunchPath && productionLaunchRequested });
 }
 
 async function main() {

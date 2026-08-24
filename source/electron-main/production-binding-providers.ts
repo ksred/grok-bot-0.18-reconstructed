@@ -464,18 +464,29 @@ export function createElectronProductionNotificationsBinding(): NotificationsBin
 export function createProductionStartupBinding(
   ports: ElectronStartupProviderPorts,
 ): ElectronProductionStartupBindings {
+  const argv = ports.argv ?? process.argv;
+  const env = ports.env ?? process.env;
+  const platform = ports.platform ?? process.platform;
   for (const [value, label] of [
     [ports?.app?.setPath, "electron.app.setPath()."],
     [ports?.app?.getPath, "electron.app.getPath()."],
-    [ports?.app?.isInApplicationsFolder, "electron.app.isInApplicationsFolder()."],
-    [ports?.app?.moveToApplicationsFolder, "electron.app.moveToApplicationsFolder()."],
     [ports?.app?.relaunch, "electron.app.relaunch()."],
     [ports?.app?.exit, "electron.app.exit()."],
     [ports?.dialog?.showMessageBox, "electron.dialog.showMessageBox()."],
   ] as const) requireFunction(value, label);
-  const argv = ports.argv ?? process.argv;
-  const env = ports.env ?? process.env;
-  const platform = ports.platform ?? process.platform;
+  if (platform === "darwin") {
+    for (const [value, label] of [
+      [ports?.app?.isInApplicationsFolder, "electron.app.isInApplicationsFolder()."],
+      [ports?.app?.moveToApplicationsFolder, "electron.app.moveToApplicationsFolder()."],
+    ] as const) requireFunction(value, label);
+  }
+  const startupApp = platform === "darwin" ? ports.app : {
+    get isPackaged() { return ports.app.isPackaged; },
+    isInApplicationsFolder: () => true,
+    moveToApplicationsFolder: () => false,
+    relaunch: (options: { readonly args: readonly string[] }) => ports.app.relaunch(options),
+    exit: (code: number) => ports.app.exit(code),
+  };
   const buffered: Array<{ readonly level: Parameters<ProductionTelemetrySink["reportDesktopStartup"]>[0]; readonly metadata: Parameters<ProductionTelemetrySink["reportDesktopStartup"]>[1] }> = [];
   let telemetry: ProductionTelemetrySink | undefined;
   const report: ElectronProductionStartupBindings["report"] = (level, metadata) => {
@@ -509,7 +520,7 @@ export function createProductionStartupBinding(
       platform,
       argv,
       env,
-      app: ports.app,
+      app: startupApp,
       dialog: ports.dialog,
       readDiscovery: ports.readDiscovery ?? (() => readLocalExecDaemonDiscovery()),
       isDaemonProcess: ports.isDaemonProcess ?? ((pid, discovery) => isLocalExecDaemonProcess(pid, discovery.entryRealpath, discovery.generationToken)),
