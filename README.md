@@ -117,6 +117,8 @@ Remote mode remains the default.
 
 ## Requirements
 
+### macOS packaging
+
 - macOS on Apple Silicon
 - Node.js 26.5.x
 - Xcode Command Line Tools
@@ -124,7 +126,28 @@ Remote mode remains the default.
 - Docker Desktop (optional, only for the local sandbox)
 - local Claude Code or Codex authentication for those router choices
 
+### Linux packaging
+
+- Linux x64 (arm64 support is scaffolded but not yet validated end-to-end)
+- Node.js 26.5.x (see `.node-version`)
+- Git LFS
+- `unzip` for Electron bootstrap extraction
+- Docker (optional, recommended for the local sandbox — works especially well on native Linux hosts)
+- A checksum-pinned upstream `app.asar` payload (see below)
+
+The Linux bootstrap downloads the official Electron 42.1.0 binary and expects the
+pinned upstream renderer/runtime archive separately. Populate one of:
+
+- `.cache/payload/app.asar` and `.cache/payload/app.asar.unpacked`
+- `GROK_BOT_018_ASAR` (and optionally `GROK_BOT_018_ASAR_UNPACKED`)
+
+The easiest path is to run `npm run bootstrap` once on macOS, then copy the
+extracted `app.asar` and `app.asar.unpacked` from the cached runtime into
+`.cache/payload/` on your Linux machine.
+
 ## Quick start
+
+### macOS
 
 ```sh
 git clone <your-repository-url>
@@ -137,6 +160,39 @@ npm run check
 npm run package
 open "dist/Grok Bot 0.18 Reconstructed.app"
 ```
+
+### Linux
+
+```sh
+git clone <your-repository-url>
+cd grok-bot-0.18-reconstructed
+git lfs install
+git lfs pull
+npm ci
+
+# Populate .cache/payload/ from a macOS bootstrap, or set GROK_BOT_018_ASAR.
+npm run bootstrap
+npm run check
+npm run package:linux
+./dist/Grok\ Bot\ 0.18\ Reconstructed-linux-x64/electron
+```
+
+`npm run package:linux` writes an unpacked directory under `dist/` and a basic
+`.desktop` file with `MimeType=x-scheme-handler/sand;`. Register deep links
+manually when needed:
+
+```sh
+xdg-mime default "Grok Bot 0.18 Reconstructed-linux-x64.desktop" x-scheme-handler/sand
+```
+
+Known Linux limitations for the first usable build:
+
+- no AppImage/deb packaging yet (unpacked directory only);
+- the checksum-pinned upstream `app.asar` must be supplied out-of-band on fresh Linux hosts;
+- macOS-only integrations (1Password launcher, WebAuthn signer) remain gated; and
+- inference routing and the local Docker sandbox are the primary validated flows.
+
+### Bootstrap details
 
 `npm run bootstrap` first uses the Git LFS preservation copy of the pinned
 0.18.0 DMG. If that archive is absent, it falls back to the original public URL;
@@ -204,6 +260,7 @@ npm run typecheck         # renderer TypeScript
 npm run source:typecheck  # runtime TypeScript
 npm run frontend:build    # build the readable renderer reconstruction
 npm run package           # build, sign, and verify the macOS app
+npm run package:linux     # build and assemble the Linux unpacked directory
 npm run verify            # verify an existing packaged app
 npm run smoke             # bounded native smoke check
 npm run publication:check # prove a fresh-history export is lossless

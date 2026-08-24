@@ -39,6 +39,7 @@ export const devOutputApp = path.join(outputDir, "Grok Bot 0.18 Dev.app");
 export const devProfileDir = path.join(cacheDir, "dev-profile");
 
 export const upstreamVersion = "0.18.0";
+export const electronVersion = "42.1.0";
 export const reconstructedBundleId = "com.anysphere.sand.reconstructed";
 export const reconstructedName = "Grok Bot 0.18 Reconstructed";
 export const fidelityBundleId = "com.anysphere.sand.reconstructed.fidelity";
@@ -46,3 +47,16 @@ export const fidelityName = "Grok Bot 0.18 Fidelity";
 export const dmgUrl = "https://downloads.cursor.com/grokbot/stable/darwin-arm64/0.18.0/Grok_Bot_0.18.0.dmg";
 export const dmgSha256 = "a253ccd8aab01e083f9812a0264354c5034d8ba7f0610bbb557e82ae77d203eb";
 export const upstreamAsarSha256 = "6665408168466f9cacc6087e917890c17f59d2e2e9c2404a5c4a59ad79c1de58";
+
+export const linuxElectronArch = process.arch === "arm64" ? "arm64" : "x64";
+export const cachedLinuxElectronDir = path.join(cacheDir, "runtime", `electron-linux-${linuxElectronArch}`);
+export const cachedPayloadDir = path.join(cacheDir, "payload");
+export const cachedPayloadAsar = path.join(cachedPayloadDir, "app.asar");
+export const cachedPayloadUnpacked = `${cachedPayloadAsar}.unpacked`;
+export const linuxElectronZipName = `electron-v${electronVersion}-linux-${linuxElectronArch}.zip`;
+export const linuxElectronZipUrl = `https://github.com/electron/electron/releases/download/v${electronVersion}/${linuxElectronZipName}`;
+export const cachedLinuxElectronZip = path.join(cacheDir, "downloads", linuxElectronZipName);
+export const linuxOutputApp = path.join(
+  outputDir,
+  `${reconstructedName}-linux-${linuxElectronArch}`,
+);

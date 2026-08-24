@@ -131,3 +131,19 @@ test("Router settings use the trusted backend and display recorded inference usa
   assert.match(coordinatorMain, /createCoordinatorInferenceRouter/);
   assert.match(coordinatorMain, /routed\.handled/);
 });
+
+test("Linux packaging script mirrors the fidelity asar pipeline", async () => {
+  const source = await readFile(path.join(repoRoot, "scripts", "package-linux.mjs"), "utf8");
+  assert.match(source, /import \{ buildFidelityReconstructedAsar \} from "\.\/clean-build\.mjs"/);
+  assert.match(source, /await buildFidelityReconstructedAsar\(\)/);
+  assert.match(source, /MimeType=x-scheme-handler\/sand;/);
+  assert.match(source, /process\.platform !== "linux"/);
+});
+
+test("bootstrap runtime exposes a Linux branch without removing macOS DMG flow", async () => {
+  const source = await readFile(path.join(repoRoot, "scripts", "bootstrap-runtime.mjs"), "utf8");
+  assert.match(source, /async function bootstrapLinux/);
+  assert.match(source, /async function bootstrapDarwin/);
+  assert.match(source, /requireDarwinTool\("hdiutil"\)/);
+  assert.match(source, /process\.platform === "linux"/);
+});

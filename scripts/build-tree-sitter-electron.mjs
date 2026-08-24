@@ -9,6 +9,7 @@ const electronAbi = "146";
 const electronNodeVersion = "24.15.0";
 const headersUrl = `https://artifacts.electronjs.org/headers/dist/v${electronVersion}/node-v${electronVersion}-headers.tar.gz`;
 const packages = ["tree-sitter", "tree-sitter-bash"];
+const defaultHeadersDir = path.join(repoRoot, "node_modules", "electron", "dist");
 
 async function readJson(relative) {
   return JSON.parse(await readFile(path.join(repoRoot, relative), "utf8"));
@@ -22,7 +23,7 @@ function run(command, args, env) {
   });
 }
 
-const headersDir = process.env.ELECTRON_HEADERS_DIR;
+const headersDir = process.env.ELECTRON_HEADERS_DIR ?? defaultHeadersDir;
 if (!headersDir) {
   throw new Error(`ELECTRON_HEADERS_DIR is required; obtain the official Electron ${electronVersion} headers from ${headersUrl}`);
 }

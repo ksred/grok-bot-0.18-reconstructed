@@ -10,7 +10,7 @@ import {
   stagedAppDir
 } from "./config.mjs";
 import { packStagedAppWithIntegrity } from "./asar-integrity.mjs";
-import { resolveRuntimeApp } from "./runtime.mjs";
+import { resolveRuntimeApp, getRuntimeUnpackedDistRoot } from "./runtime.mjs";
 
 export const reconstructedUpdaterGuard = [
   "// Reconstructed-build guard: do not consume official update or telemetry services.",
@@ -138,8 +138,7 @@ export async function buildAsar({
   unpackedRoot = builtAsarUnpacked,
 } = {}) {
   const runtimeApp = await resolveRuntimeApp();
-  const resources = path.join(runtimeApp, "Contents", "Resources");
-  const runtimeUnpacked = path.join(resources, "app.asar.unpacked", "dist");
+  const runtimeUnpacked = path.join(getRuntimeUnpackedDistRoot(runtimeApp));
 
   await rm(buildRoot, { recursive: true, force: true });
   await mkdir(buildRoot, { recursive: true });
