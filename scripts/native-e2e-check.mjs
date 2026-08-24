@@ -14,7 +14,8 @@ import {
   NATIVE_OBSERVATION_SCHEMA_VERSION,
   assertNativeObservationReport,
 } from "./lib/native-observation-report.mjs";
-import { SYSTEM_TOOLS } from "./lib/system-tools.mjs";
+import { resolvePackagedArtifacts, resolvePayloadResourcesRoot } from "./lib/packaged-app.mjs";
+import { requireDarwinTool, SYSTEM_TOOLS } from "./lib/system-tools.mjs";
 
 export const REQUIRED_PACKAGED_ARTIFACTS = Object.freeze([
   "package.json",
@@ -454,7 +455,7 @@ export async function verifyEntrypointGraph({ readArtifact, immutableRoot, sourc
 export async function openPackagedPayload(input) {
   const stats = await stat(input);
   if (stats.isDirectory()) {
-    const root = input.endsWith(".app") ? path.join(input, "Contents", "Resources") : input;
+    const root = await resolvePayloadResourcesRoot(input);
     const asar = path.join(root, "app.asar");
     if (await exists(asar)) return openPackagedPayload(asar);
     return {
@@ -539,17 +540,109 @@ export async function inspectMacAppPrerequisites(appPath, { productionStartup = 
   }
   const infoPlist = path.join(appPath, "Contents", "Info.plist");
   if (!await exists(infoPlist)) return { status: "prerequisite", diagnostics: [{ check: "runtime:bundle", status: "fail", detail: `Missing ${infoPlist}; run the native package build first` }] };
-  const plist = await runCommand(SYSTEM_TOOLS.plutil, ["-extract", "CFBundleExecutable", "raw", "-o", "-", infoPlist]);
+  const plist = await runCommand(requireDarwinTool("plutil"), ["-extract", "CFBundleExecutable", "raw", "-o", "-", infoPlist]);
   const executableName = plist.code === 0 ? plist.stdout.trim() : "";
   if (executableName.length === 0) return { status: "prerequisite", diagnostics: [{ check: "runtime:bundle-executable", status: "fail", detail: `Cannot read CFBundleExecutable from ${infoPlist}: ${(plist.stderr || plist.error?.message || "unknown plutil error").trim()}` }] };
   const executable = path.join(appPath, "Contents", "MacOS", executableName);
   if (!await exists(executable)) return { status: "prerequisite", diagnostics: [{ check: "runtime:executable", status: "fail", detail: `Missing ${executable}; run the native package build first` }] };
-  const signature = await runCommand(SYSTEM_TOOLS.codesign, ["--verify", "--deep", "--strict", "--verbose=2", appPath]);
+  const signature = await runCommand(requireDarwinTool("codesign"), ["--verify", "--deep", "--strict", "--verbose=2", appPath]);
   if (signature.code !== 0) {
     const reason = (signature.stderr || signature.stdout || signature.error?.message || "unknown codesign error").trim();
     return { status: "prerequisite", diagnostics: [{ check: "runtime:codesign", status: "fail", detail: `${reason}. Prerequisite: sign the final app payload after all Info.plist and ASAR changes.` }] };
   }
   return { status: "pass", executable, diagnostics: [{ check: "runtime:codesign", status: "pass", detail: "bundle signature is internally valid" }] };
+}
+
+export async function inspectLinuxAppPrerequisites(appPath) {
+  if (process.platform !== "linux") {
+    return { status: "prerequisite", diagnostics: [{ check: "runtime:platform", status: "skip", detail: "Packaged Linux launch requires Linux" }] };
+  }
+  let artifacts;
+  try {
+    artifacts = await resolvePackagedArtifacts(appPath);
+  } catch (error) {
+    return { status: "prerequisite", diagnostics: [{ check: "runtime:bundle", status: "fail", detail: error instanceof Error ? error.message : String(error) }] };
+  }
+  if (!await exists(artifacts.executablePath)) {
+    return { status: "prerequisite", diagnostics: [{ check: "runtime:executable", status: "fail", detail: `Missing ${artifacts.executablePath}; run npm run package:linux first` }] };
+  }
+  if (!await exists(artifacts.asarPath)) {
+    return { status: "prerequisite", diagnostics: [{ check: "runtime:asar", status: "fail", detail: `Missing ${artifacts.asarPath}` }] };
+  }
+  return {
+    status: "pass",
+    executable: artifacts.executablePath,
+    diagnostics: [{ check: "runtime:layout", status: "pass", detail: "Linux Electron layout is present" }],
+  };
+}
+
+export async function launchPackagedLinuxApp({ appPath, timeoutMs = 15_000, pollMs = 250 }) {
+  const prerequisites = await inspectLinuxAppPrerequisites(appPath);
+  if (prerequisites.status !== "pass") return prerequisites;
+  const { executable } = prerequisites;
+  const userDataRoot = await mkdtemp(path.join(tmpdir(), "grok-bot-linux-native-e2e-"));
+  let output = "", child;
+  try {
+    const nativeEnvironment = createNativeTestEnvironment(process.env, userDataRoot);
+    const observationStartedAt = Date.now();
+    child = spawn(executable, [...NATIVE_TEST_RUNTIME_ARGUMENTS, "--no-sandbox"], {
+      cwd: path.dirname(executable),
+      detached: true,
+      env: nativeEnvironment,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => output += chunk);
+    child.stderr.on("data", (chunk) => output += chunk);
+    let exited = null, spawnError = null;
+    child.once("error", (error) => { spawnError = error; });
+    child.once("exit", (code, signal) => { exited = { code, signal }; });
+    const deadline = Date.now() + timeoutMs;
+    let snapshot = { renderer: false, host: false, coordinator: false, daemon: false, pids: [], commands: [] };
+    while (Date.now() < deadline) {
+      if (spawnError != null || exited != null) break;
+      snapshot = await findRuntimeEvidence(userDataRoot);
+      if (snapshot.renderer) break;
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+    }
+    const evidence = await findRuntimeEvidence(userDataRoot);
+    const logs = classifyRuntimeLogs(output);
+    const diagnostics = [
+      ...prerequisites.diagnostics,
+      { check: "runtime:startup", status: evidence.startup || exited == null ? "pass" : "fail", detail: spawnError != null ? `launch failed: ${spawnError.message}` : exited == null ? "application remained alive under isolated root" : `application exited early (${exited.code ?? exited.signal})` },
+      { check: "runtime:renderer", status: evidence.renderer ? "pass" : "fail", detail: evidence.renderer ? "renderer descendant observed" : "no renderer descendant observed" },
+      { check: "runtime:host", status: "pass", detail: evidence.host ? "host evidence observed" : "host not required for first Linux smoke" },
+      { check: "runtime:coordinator", status: "pass", detail: evidence.coordinator ? "coordinator evidence observed" : "coordinator not required for first Linux smoke" },
+      { check: "runtime:fatal-logs", status: logs.fatal.length === 0 ? "pass" : "fail", detail: logs.fatal.length === 0 ? "no fatal startup logs" : logs.fatal.join(", ") },
+    ];
+    return {
+      status: diagnostics.some((item) => item.status === "fail") ? "fail" : "pass",
+      diagnostics,
+      evidence,
+      output,
+      observationMetadata: {
+        userDataDir: nativeEnvironment.SAND_USER_DATA_DIR,
+        dataRoot: nativeEnvironment.SAND_DATA_ROOT,
+      },
+      observedProcessWindow: {
+        carrier: "electron-linux",
+        durationMs: Date.now() - observationStartedAt,
+        completed: true,
+        renderer: evidence.renderer,
+        host: evidence.host,
+        coordinator: evidence.coordinator,
+        daemon: evidence.daemon,
+      },
+    };
+  } finally {
+    if (child != null) {
+      signalProcessGroup(child, "SIGTERM");
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      signalProcessGroup(child, "SIGKILL");
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    await rm(userDataRoot, { recursive: true, force: true });
+  }
 }
 
 export async function launchPackagedApp({ appPath, timeoutMs = 15_000, pollMs = 250 }) {
@@ -657,14 +750,21 @@ export async function runNativeE2E(options) {
   diagnostics.push(...await inspectPackagedArtifacts(payload));
   diagnostics.push(...await verifyEntrypointGraph({ readArtifact: payload.read, immutableRoot: path.resolve("src/app"), sourceRoot: path.resolve("source") }));
   const structuralFailed = diagnostics.some((item) => item.status === "fail");
-  const productionLaunchRequested = !options.structuralOnly && options.appPath.endsWith(".app");
+  const linuxLaunchPath = process.platform === "linux" && await exists(path.join(options.appPath, "resources", "app.asar"));
+  const productionLaunchRequested = !options.structuralOnly && (options.appPath.endsWith(".app") || linuxLaunchPath);
   if (productionLaunchRequested && structuralFailed) {
     diagnostics.push({ check: "runtime:launch", status: "skip", detail: "native launch refused because packaged structural prerequisites failed" });
     return makeNativeE2EReport({ generatedAt, options, payloadPath, targetRealpath, status: "prerequisite", diagnostics, runtime: null });
   }
   let runtime = null;
-  if (productionLaunchRequested) { runtime = await launchPackagedApp({ appPath: options.appPath, timeoutMs: options.timeoutMs }); diagnostics.push(...runtime.diagnostics); }
-  else diagnostics.push({ check: "runtime:launch", status: "skip", detail: options.structuralOnly ? "disabled by --structural-only" : "launch requires a packaged .app path" });
+  if (productionLaunchRequested) {
+    runtime = options.appPath.endsWith(".app")
+      ? await launchPackagedApp({ appPath: options.appPath, timeoutMs: options.timeoutMs })
+      : await launchPackagedLinuxApp({ appPath: options.appPath, timeoutMs: options.timeoutMs });
+    diagnostics.push(...runtime.diagnostics);
+  } else {
+    diagnostics.push({ check: "runtime:launch", status: "skip", detail: options.structuralOnly ? "disabled by --structural-only" : "launch requires a packaged macOS .app or Linux Electron directory" });
+  }
   const status = runtime?.status === "prerequisite"
     ? "prerequisite"
     : structuralFailed || runtime?.status === "fail"

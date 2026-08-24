@@ -10,7 +10,7 @@ import { buildFidelityReconstructedAsar } from "./clean-build.mjs";
 import { signAppBundleAdHoc } from "./lib/codesign.mjs";
 import { verifyOfficialMacReference, verifyReconstructedMacPackage } from "./lib/macos-package-verification.mjs";
 import { run } from "./lib/process.mjs";
-import { SYSTEM_TOOLS } from "./lib/system-tools.mjs";
+import { requireDarwinTool } from "./lib/system-tools.mjs";
 
 if (process.platform !== "darwin") {
   throw new Error("The reconstructed macOS application can only be packaged on macOS.");
@@ -25,11 +25,11 @@ const { builtAsar, builtAsarUnpacked, runtimeApp } = await buildFidelityReconstr
 await verifyOfficialMacReference({ runtimeApp });
 await mkdir(outputDir, { recursive: true });
 await rm(outputApp, { recursive: true, force: true });
-await run(SYSTEM_TOOLS.ditto, [runtimeApp, outputApp]);
+await run(requireDarwinTool("ditto"), [runtimeApp, outputApp]);
 // The source DMG's quarantine/provenance applies to Anysphere's signed artifact,
 // not to this differently identified local reconstruction. Leaving it attached
 // makes Gatekeeper reject the otherwise valid ad-hoc signature before launch.
-await run(SYSTEM_TOOLS.xattr, ["-cr", outputApp]);
+await run(requireDarwinTool("xattr"), ["-cr", outputApp]);
 
 const resources = path.join(outputApp, "Contents", "Resources");
 const packagedAsar = path.join(resources, "app.asar");
@@ -44,14 +44,14 @@ await cp(builtAsarUnpacked, packagedUnpacked, {
 });
 
 const infoPlist = path.join(outputApp, "Contents", "Info.plist");
-await run(SYSTEM_TOOLS.plutil, ["-remove", "ElectronAsarIntegrity", infoPlist]);
-await run(SYSTEM_TOOLS.plutil, ["-replace", "CFBundleIdentifier", "-string", reconstructedBundleId, infoPlist]);
-await run(SYSTEM_TOOLS.plutil, ["-replace", "CFBundleDisplayName", "-string", reconstructedName, infoPlist]);
+await run(requireDarwinTool("plutil"), ["-remove", "ElectronAsarIntegrity", infoPlist]);
+await run(requireDarwinTool("plutil"), ["-replace", "CFBundleIdentifier", "-string", reconstructedBundleId, infoPlist]);
+await run(requireDarwinTool("plutil"), ["-replace", "CFBundleDisplayName", "-string", reconstructedName, infoPlist]);
 // The backend currently emits only the `sand` auth/deep-link target. Make the
 // reconstructed bundle's claim explicit and remove inherited aliases such as
 // `grokbot`; the original bundle remains untouched and remains reference-only.
-await run(SYSTEM_TOOLS.plutil, ["-remove", "CFBundleURLTypes", infoPlist]);
-await run(SYSTEM_TOOLS.plutil, ["-insert", "CFBundleURLTypes", "-xml", "<array><dict><key>CFBundleTypeRole</key><string>Viewer</string><key>CFBundleURLName</key><string>Grok Bot reconstructed auth callback</string><key>CFBundleURLSchemes</key><array><string>sand</string></array></dict></array>", infoPlist]);
+await run(requireDarwinTool("plutil"), ["-remove", "CFBundleURLTypes", infoPlist]);
+await run(requireDarwinTool("plutil"), ["-insert", "CFBundleURLTypes", "-xml", "<array><dict><key>CFBundleTypeRole</key><string>Viewer</string><key>CFBundleURLName</key><string>Grok Bot reconstructed auth callback</string><key>CFBundleURLSchemes</key><array><string>sand</string></array></dict></array>", infoPlist]);
 // Keep CFBundleName/CFBundleExecutable as "Grok Bot": Electron derives the
 // expected nested helper names from it, and this build intentionally reuses the
 // exact ABI-matched 0.18 runtime. CFBundleDisplayName provides the fork's name.
@@ -66,7 +66,7 @@ try {
   console.warn(`Initial ad-hoc signing pass failed; retrying once: ${String(error)}`);
   await signAppBundleAdHoc(outputApp);
 }
-await run(SYSTEM_TOOLS.codesign, ["--verify", "--deep", "--strict", outputApp]);
+await run(requireDarwinTool("codesign"), ["--verify", "--deep", "--strict", outputApp]);
 const verification = await verifyReconstructedMacPackage({
   officialApp: runtimeApp,
   reconstructedApp: outputApp,

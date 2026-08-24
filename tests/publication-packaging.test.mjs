@@ -147,3 +147,12 @@ test("bootstrap runtime exposes a Linux branch without removing macOS DMG flow",
   assert.match(source, /requireDarwinTool\("hdiutil"\)/);
   assert.match(source, /process\.platform === "linux"/);
 });
+
+test("packaged artifact resolution supports Linux Electron directories", async () => {
+  const { resolvePackagedLinuxArtifacts } = await import("../scripts/lib/packaged-app.mjs");
+  const appDir = path.join(repoRoot, "dist", "Example-linux-x64");
+  const artifacts = resolvePackagedLinuxArtifacts(appDir);
+  assert.equal(artifacts.platform, "linux");
+  assert.equal(artifacts.asarPath, path.join(appDir, "resources", "app.asar"));
+  assert.equal(artifacts.executablePath, path.join(appDir, "electron"));
+});

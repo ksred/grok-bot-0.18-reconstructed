@@ -15,7 +15,11 @@ import {
 import { prepareReconstructedElectronMainArtifactFallback } from "./lib/build-asar.mjs";
 import { resolvePackagedAppArtifacts } from "./lib/packaged-app.mjs";
 import { capture, run } from "./lib/process.mjs";
-import { SYSTEM_TOOLS } from "./lib/system-tools.mjs";
+import { requireDarwinTool } from "./lib/system-tools.mjs";
+
+if (process.platform !== "darwin") {
+  throw new Error("The reconstructed macOS application can only be verified on macOS. Use scripts/verify-linux.mjs on Linux.");
+}
 
 function readAppArgument(argv) {
   const index = argv.indexOf("--app");
@@ -252,16 +256,16 @@ for (const fallback of sourceFallbacks) {
 }
 
 const infoPlist = path.join(verifiedApp, "Contents", "Info.plist");
-const bundleId = await capture(SYSTEM_TOOLS.plutil, ["-extract", "CFBundleIdentifier", "raw", infoPlist]);
+const bundleId = await capture(requireDarwinTool("plutil"), ["-extract", "CFBundleIdentifier", "raw", infoPlist]);
 if (bundleId !== reconstructedBundleId) throw new Error(`Unexpected reconstructed bundle ID: ${bundleId}`);
-const displayName = await capture(SYSTEM_TOOLS.plutil, ["-extract", "CFBundleDisplayName", "raw", infoPlist]);
+const displayName = await capture(requireDarwinTool("plutil"), ["-extract", "CFBundleDisplayName", "raw", infoPlist]);
 if (displayName !== reconstructedName) throw new Error(`Unexpected reconstructed display name: ${displayName}`);
-const plistText = await capture(SYSTEM_TOOLS.plutil, ["-convert", "xml1", "-o", "-", infoPlist]);
+const plistText = await capture(requireDarwinTool("plutil"), ["-convert", "xml1", "-o", "-", infoPlist]);
 if (plistText.includes("ElectronAsarIntegrity")) throw new Error("Stale ElectronAsarIntegrity metadata remains in the reconstructed application");
-const urlTypes = await capture(SYSTEM_TOOLS.plutil, ["-extract", "CFBundleURLTypes", "xml1", "-o", "-", infoPlist]);
+const urlTypes = await capture(requireDarwinTool("plutil"), ["-extract", "CFBundleURLTypes", "xml1", "-o", "-", infoPlist]);
 if (!/<key>CFBundleURLSchemes<\/key>[\s\S]*<string>sand<\/string>/.test(urlTypes)) throw new Error("Reconstructed application has no sand URL registration");
 
-await run(SYSTEM_TOOLS.codesign, ["--verify", "--deep", "--strict", verifiedApp]);
+await run(requireDarwinTool("codesign"), ["--verify", "--deep", "--strict", verifiedApp]);
 const cleanCount = runtimeComposition.filter(({ mode }) => mode === "clean-source").length;
 const fallbackNames = runtimeComposition.filter(({ mode }) => mode !== "clean-source").map(({ runtime }) => runtime).join(", ");
 console.log(`Verified packaged ASAR ${builtAsar}.`);

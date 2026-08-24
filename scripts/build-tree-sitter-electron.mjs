@@ -1,7 +1,8 @@
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { resolveElectronHeadersDir, readElectronHeaderVersion } from "./lib/electron-headers.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const electronVersion = "42.1.0";
@@ -9,7 +10,6 @@ const electronAbi = "146";
 const electronNodeVersion = "24.15.0";
 const headersUrl = `https://artifacts.electronjs.org/headers/dist/v${electronVersion}/node-v${electronVersion}-headers.tar.gz`;
 const packages = ["tree-sitter", "tree-sitter-bash"];
-const defaultHeadersDir = path.join(repoRoot, "node_modules", "electron", "dist");
 
 async function readJson(relative) {
   return JSON.parse(await readFile(path.join(repoRoot, relative), "utf8"));
@@ -23,12 +23,9 @@ function run(command, args, env) {
   });
 }
 
-const headersDir = process.env.ELECTRON_HEADERS_DIR ?? defaultHeadersDir;
-if (!headersDir) {
-  throw new Error(`ELECTRON_HEADERS_DIR is required; obtain the official Electron ${electronVersion} headers from ${headersUrl}`);
-}
+const headersDir = await resolveElectronHeadersDir();
 
-const headerVersion = await readFile(path.join(headersDir, "node_version.h"), "utf8").catch(async () => readFile(path.join(headersDir, "include", "node", "node_version.h"), "utf8"));
+const headerVersion = await readElectronHeaderVersion(headersDir);
 if (!new RegExp(`#define NODE_MODULE_VERSION ${electronAbi}\\b`).test(headerVersion)) {
   throw new Error(`Electron headers at ${headersDir} do not declare NODE_MODULE_VERSION ${electronAbi}`);
 }
@@ -57,12 +54,26 @@ for (const packageName of packages) {
   await run(gyp, ["rebuild", "--directory", packageRoot, "--release", "--nodedir", headersDir, "--jobs", "max"], env);
 }
 
+const rebuiltNodes = [];
+for (const packageName of packages) {
+  const buildRoot = path.join(repoRoot, "node_modules", packageName, "build");
+  for (const entry of await readdir(buildRoot, { withFileTypes: true })) {
+    if (entry.isFile() && entry.name.endsWith(".node")) {
+      rebuiltNodes.push(path.join(buildRoot, entry.name));
+    }
+  }
+}
+if (rebuiltNodes.length === 0) {
+  throw new Error(`No rebuilt .node binaries found for ${packages.join(", ")}`);
+}
+
 console.log(JSON.stringify({
   electron: electronVersion,
   node: electronNodeVersion,
   modules: Number(electronAbi),
   headers: headersDir,
   packages,
+  rebuiltNodes,
   platform: process.platform,
   arch: process.arch,
 }, null, 2));

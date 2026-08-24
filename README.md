@@ -192,6 +192,30 @@ Known Linux limitations for the first usable build:
 - macOS-only integrations (1Password launcher, WebAuthn signer) remain gated; and
 - inference routing and the local Docker sandbox are the primary validated flows.
 
+### Linux smoke test
+
+After `npm run package:linux`:
+
+```sh
+npm run verify:linux
+npm run smoke:linux
+```
+
+Manual launch:
+
+```sh
+./dist/Grok\ Bot\ 0.18\ Reconstructed-linux-x64/electron
+```
+
+Confirm the original polished UI loads, open **Settings → Router**, and optionally
+toggle **Use local Docker VM** when Docker is available.
+
+Populate the payload cache from a macOS bootstrap when moving machines:
+
+```sh
+GROK_BOT_018_ASAR=/path/to/app.asar npm run payload:populate
+```
+
 ### Bootstrap details
 
 `npm run bootstrap` first uses the Git LFS preservation copy of the pinned
@@ -261,6 +285,9 @@ npm run source:typecheck  # runtime TypeScript
 npm run frontend:build    # build the readable renderer reconstruction
 npm run package           # build, sign, and verify the macOS app
 npm run package:linux     # build and assemble the Linux unpacked directory
+npm run verify:linux      # verify a packaged Linux directory
+npm run smoke:linux       # bounded Linux launch smoke check
+npm run payload:populate  # copy app.asar payload into .cache/payload
 npm run verify            # verify an existing packaged app
 npm run smoke             # bounded native smoke check
 npm run publication:check # prove a fresh-history export is lossless
