@@ -177,22 +177,25 @@ npm ci
 npm run bootstrap
 npm run check
 npm run package:linux
-./dist/Grok\ Bot\ 0.18\ Reconstructed-linux-x64/electron
+./dist/Grok\ Bot\ 0.18\ Reconstructed-linux-x64/grok-bot
 ```
 
-`npm run package:linux` writes an unpacked directory under `dist/` and a basic
-`.desktop` file with `MimeType=x-scheme-handler/sand;`. Register deep links
-manually when needed:
+`npm run package:linux` writes an unpacked directory under `dist/`, a `grok-bot`
+launch wrapper (adds `--disable-gpu` and `--disable-dev-shm-usage` for Linux
+GPU/headless compatibility), and a `.desktop` file with
+`MimeType=x-scheme-handler/sand;`. Register deep links manually when needed:
 
 ```sh
 xdg-mime default "Grok Bot 0.18 Reconstructed-linux-x64.desktop" x-scheme-handler/sand
 ```
 
-Known Linux limitations for the first usable build:
+Known Linux limitations:
 
 - no AppImage/deb packaging yet (unpacked directory only);
-- the checksum-pinned upstream `app.asar` must be supplied out-of-band on fresh Linux hosts;
-- macOS-only integrations (1Password launcher, WebAuthn signer) remain gated; and
+- `@anysphere/tree-chunk-napi` and `cursor-proclist` are not available on Linux
+  (Anysphere-internal / macOS-only); reconstructed code degrades gracefully when
+  they are absent;
+- macOS-only integrations (`dist/native/` launchers, WebAuthn signer) remain gated; and
 - inference routing and the local Docker sandbox are the primary validated flows.
 
 ### Linux smoke test
@@ -207,7 +210,7 @@ npm run smoke:linux
 Manual launch:
 
 ```sh
-./dist/Grok\ Bot\ 0.18\ Reconstructed-linux-x64/electron
+./dist/Grok\ Bot\ 0.18\ Reconstructed-linux-x64/grok-bot
 ```
 
 Confirm the original polished UI loads, open **Settings → Router**, and optionally

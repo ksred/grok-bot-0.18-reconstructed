@@ -137,7 +137,17 @@ test("Linux packaging script mirrors the fidelity asar pipeline", async () => {
   assert.match(source, /import \{ buildFidelityReconstructedAsar \} from "\.\/clean-build\.mjs"/);
   assert.match(source, /await buildFidelityReconstructedAsar\(\)/);
   assert.match(source, /MimeType=x-scheme-handler\/sand;/);
+  assert.match(source, /linuxLaunchWrapperScript/);
   assert.match(source, /process\.platform !== "linux"/);
+});
+
+test("Linux native staging rebuilds Electron runtime dependencies", async () => {
+  const source = await readFile(path.join(repoRoot, "scripts", "lib", "stage-linux-electron-deps.mjs"), "utf8");
+  assert.match(source, /stageBetterSqlite3/);
+  assert.match(source, /stageWhichlangLinux/);
+  assert.match(source, /updateLinuxRuntimeDepsManifest/);
+  assert.match(source, /assertElfNode/);
+  assert.doesNotMatch(source, /keeping reference/);
 });
 
 test("bootstrap runtime exposes a Linux branch without removing macOS DMG flow", async () => {

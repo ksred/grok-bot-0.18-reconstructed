@@ -15,6 +15,7 @@ import {
   assertNativeObservationReport,
 } from "./lib/native-observation-report.mjs";
 import { resolvePackagedArtifacts, resolvePayloadResourcesRoot } from "./lib/packaged-app.mjs";
+import { LINUX_ELECTRON_LAUNCH_FLAGS } from "./lib/linux-launch-flags.mjs";
 import { requireDarwinTool, SYSTEM_TOOLS } from "./lib/system-tools.mjs";
 
 export const REQUIRED_PACKAGED_ARTIFACTS = Object.freeze([
@@ -618,7 +619,7 @@ export async function launchPackagedLinuxApp({ appPath, timeoutMs = 15_000, poll
   try {
     const nativeEnvironment = createNativeTestEnvironment(process.env, userDataRoot);
     const observationStartedAt = Date.now();
-    child = spawn(executable, [...NATIVE_TEST_RUNTIME_ARGUMENTS, "--no-sandbox"], {
+    child = spawn(executable, [...LINUX_ELECTRON_LAUNCH_FLAGS, "--no-sandbox"], {
       cwd: path.dirname(executable),
       detached: true,
       env: nativeEnvironment,

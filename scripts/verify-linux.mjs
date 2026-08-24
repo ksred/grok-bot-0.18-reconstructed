@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { access, readFile } from "node:fs/promises";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { extractFile, listPackage } from "@electron/asar";
 
 import {
@@ -32,6 +33,14 @@ function readAppArgument(argv) {
   return path.resolve(argv[index + 1]);
 }
 
+function assertElfNode(nodePath, arch = process.arch === "arm64" ? "aarch64" : "x86-64") {
+  const result = spawnSync("file", [nodePath], { encoding: "utf8" });
+  const description = result.stdout?.trim() ?? "";
+  if (!description.includes("ELF") || !description.includes(arch)) {
+    throw new Error(`Expected Linux ELF (${arch}) for ${nodePath}, got: ${description || "unknown"}`);
+  }
+}
+
 const verifiedApp = readAppArgument(process.argv.slice(2));
 const artifacts = await resolvePackagedArtifacts(verifiedApp);
 
@@ -43,6 +52,15 @@ if (!(await exists(artifacts.asarPath))) {
 }
 if (!(await exists(artifacts.unpackedPath))) {
   throw new Error(`Missing unpacked runtime at ${artifacts.unpackedPath}`);
+}
+
+const launchWrapper = path.join(verifiedApp, "grok-bot");
+if (!(await exists(launchWrapper))) {
+  throw new Error(`Missing launch wrapper at ${launchWrapper}`);
+}
+const wrapperSource = await readFile(launchWrapper, "utf8");
+if (!wrapperSource.includes("--disable-gpu")) {
+  throw new Error("Launch wrapper is missing Linux GPU compatibility flags");
 }
 
 const asarBytes = await readFile(artifacts.asarPath);
@@ -68,6 +86,20 @@ if (!mainSource.includes("SAND_DISABLE_UPDATES")) {
   throw new Error("Reconstructed updater guard is missing from packaged electron-main");
 }
 
+const gnuTag = process.arch === "arm64" ? "linux-arm64-gnu" : "linux-x64-gnu";
+const requiredNativeNodes = [
+  path.join(artifacts.unpackedPath, "dist", "deps", "tree-sitter", "build", "Release", "tree_sitter_runtime_binding.node"),
+  path.join(artifacts.unpackedPath, "dist", "deps", "tree-sitter-bash", "build", "Release", "tree_sitter_bash_binding.node"),
+  path.join(artifacts.unpackedPath, "dist", "deps", "better-sqlite3", "build", "Release", "better_sqlite3.node"),
+  path.join(artifacts.unpackedPath, "dist", "deps", "whichlang-node", `whichlang-node.${gnuTag}.node`),
+];
+for (const nodePath of requiredNativeNodes) {
+  if (!(await exists(nodePath))) {
+    throw new Error(`Missing required Linux native module ${nodePath}`);
+  }
+  assertElfNode(nodePath);
+}
+
 const desktopPath = path.join(verifiedApp, `${path.basename(verifiedApp)}.desktop`);
 if (await exists(desktopPath)) {
   const desktop = await readFile(desktopPath, "utf8");
@@ -77,9 +109,14 @@ if (await exists(desktopPath)) {
   if (!desktop.includes("%u")) {
     throw new Error("Desktop entry is missing %u deep-link placeholder");
   }
+  if (!desktop.includes("grok-bot")) {
+    throw new Error("Desktop entry should launch via the grok-bot wrapper");
+  }
 }
 
 console.log(`Verified Linux package: ${verifiedApp}`);
+console.log(`Launch wrapper: ${launchWrapper}`);
 console.log(`Electron binary: ${artifacts.executablePath}`);
 console.log(`Packaged asar: ${artifacts.asarPath} (${asarSha256.slice(0, 12)}…)`);
+console.log(`Linux native modules: ${requiredNativeNodes.length}/${requiredNativeNodes.length} ELF binaries present`);
 console.log(`Display name: ${reconstructedName}`);
