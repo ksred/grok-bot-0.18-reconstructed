@@ -9,6 +9,7 @@ export const NATIVE_OBSERVATION_CLASSES = Object.freeze({
   coordinatorNativeReplacementMain: "non-production-coordinator-native-harness",
   prerequisiteNoLaunch: "deterministic-prerequisite-no-launch",
   productionStartup: "admissible-production-startup-observation",
+  linuxProductionStartup: "admissible-linux-production-startup-observation",
 });
 export const NATIVE_OBSERVATION_ENV_DENYLIST = Object.freeze([
   "GROK_BOT_RECONSTRUCTED_DEV",
@@ -79,6 +80,7 @@ const CLASS_STATUSES = Object.freeze({
   [NATIVE_OBSERVATION_CLASSES.coordinatorNativeReplacementMain]: new Set(["pass", "fail"]),
   [NATIVE_OBSERVATION_CLASSES.prerequisiteNoLaunch]: new Set(["prerequisite"]),
   [NATIVE_OBSERVATION_CLASSES.productionStartup]: new Set(["pass", "fail"]),
+  [NATIVE_OBSERVATION_CLASSES.linuxProductionStartup]: new Set(["pass", "fail"]),
 });
 const CLASS_PRODUCERS = Object.freeze({
   [NATIVE_OBSERVATION_CLASSES.structuralOnly]: new Set(["native-e2e", "runtime-entrypoint-smoke"]),
@@ -87,6 +89,7 @@ const CLASS_PRODUCERS = Object.freeze({
   [NATIVE_OBSERVATION_CLASSES.coordinatorNativeReplacementMain]: new Set(["coordinator-production-native-observation"]),
   [NATIVE_OBSERVATION_CLASSES.prerequisiteNoLaunch]: new Set(PRODUCERS),
   [NATIVE_OBSERVATION_CLASSES.productionStartup]: new Set(["native-e2e", "runtime-entrypoint-smoke"]),
+  [NATIVE_OBSERVATION_CLASSES.linuxProductionStartup]: new Set(["native-e2e", "runtime-entrypoint-smoke"]),
 });
 
 function isRecord(value) {
@@ -249,6 +252,19 @@ export function validateNativeObservationReport(report) {
       : [];
     if (sandLabDiagnostics.length !== 1 || sandLabDiagnostics[0]?.status !== "pass") errors.push("production-startup requires exactly one passing package:sand-lab diagnostic");
     if (report.status === "pass" && (window?.renderer !== true || window?.host !== false || window?.coordinator !== false)) errors.push("passing production startup requires renderer present with host/coordinator absent for a fresh logged-out profile");
+  }
+  if (observationClass === NATIVE_OBSERVATION_CLASSES.linuxProductionStartup) {
+    if (provenance?.productionStartup !== true || provenance?.replacementMain !== false) errors.push("linux-production-startup requires production main without replacement");
+    if (provenance?.applicationsLocation?.status !== "not-applicable") errors.push("linux-production-startup requires Applications provenance not-applicable");
+    if (provenance?.environmentDenylist?.deniedKeysAbsent !== true) errors.push("linux-production-startup requires every denied environment key absent");
+    if (provenance?.mockKeychainCapability !== "not-applicable") errors.push("linux-production-startup requires mock-Keychain capability not-applicable");
+    if (provenance?.freshRoots?.status !== "isolated" || provenance.freshRoots.dataRoot !== path.join(provenance.freshRoots.userDataDir ?? "", "sand-data")) errors.push("linux-production-startup requires fresh absolute user-data and sand-data roots");
+    if (window?.carrier !== "electron-window" || window.completed !== true) errors.push("linux-production-startup requires a completed electron-window observation");
+    const sandLabDiagnostics = Array.isArray(report.diagnostics)
+      ? report.diagnostics.filter((diagnostic) => diagnostic?.check === "package:sand-lab")
+      : [];
+    if (sandLabDiagnostics.length !== 1 || sandLabDiagnostics[0]?.status !== "pass") errors.push("linux-production-startup requires exactly one passing package:sand-lab diagnostic");
+    if (report.status === "pass" && window?.renderer !== true) errors.push("passing linux production startup requires renderer present");
   }
 
   return { valid: errors.length === 0, errors };

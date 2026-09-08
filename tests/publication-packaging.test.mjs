@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -130,4 +130,57 @@ test("Router settings use the trusted backend and display recorded inference usa
   assert.match(coordinator, /kind: "send-message"/);
   assert.match(coordinatorMain, /createCoordinatorInferenceRouter/);
   assert.match(coordinatorMain, /routed\.handled/);
+});
+
+test("Linux packaging script mirrors the fidelity asar pipeline", async () => {
+  const source = await readFile(path.join(repoRoot, "scripts", "package-linux.mjs"), "utf8");
+  assert.match(source, /import \{ buildFidelityReconstructedAsar \} from "\.\/clean-build\.mjs"/);
+  assert.match(source, /await buildFidelityReconstructedAsar\(\)/);
+  assert.match(source, /MimeType=x-scheme-handler\/sand;/);
+  assert.match(source, /linuxLaunchWrapperScript/);
+  assert.match(source, /process\.platform !== "linux"/);
+});
+
+test("Linux native staging rebuilds Electron runtime dependencies", async () => {
+  const source = await readFile(path.join(repoRoot, "scripts", "lib", "stage-linux-electron-deps.mjs"), "utf8");
+  assert.match(source, /stageBetterSqlite3/);
+  assert.match(source, /stageWhichlangLinux/);
+  assert.match(source, /updateLinuxRuntimeDepsManifest/);
+  assert.match(source, /assertElfNode/);
+  assert.doesNotMatch(source, /keeping reference/);
+});
+
+test("bootstrap runtime exposes a Linux branch without removing macOS DMG flow", async () => {
+  const source = await readFile(path.join(repoRoot, "scripts", "bootstrap-runtime.mjs"), "utf8");
+  assert.match(source, /async function bootstrapLinux/);
+  assert.match(source, /async function bootstrapDarwin/);
+  assert.match(source, /requireDarwinTool\("hdiutil"\)/);
+  assert.match(source, /process\.platform === "linux"/);
+  assert.match(source, /cachePayloadFromDmg/);
+});
+
+test("archived macOS DMG yields the checksum-pinned app.asar", async () => {
+  const { extractPayloadFromDmg } = await import("../scripts/lib/extract-payload-from-dmg.mjs");
+  const { rm } = await import("node:fs/promises");
+  const dmg = path.join(repoRoot, "research-archives", "original", "0.18.0", "macos-arm64", "Grok_Bot_0.18.0.dmg");
+  await access(dmg);
+  const metadata = await stat(dmg);
+  if (metadata.size < 1_000_000) {
+    assert.fail("macos-arm64/Grok_Bot_0.18.0.dmg requires git lfs pull");
+  }
+  const extracted = await extractPayloadFromDmg(dmg);
+  try {
+    assert.equal(extracted.sha256, "6665408168466f9cacc6087e917890c17f59d2e2e9c2404a5c4a59ad79c1de58");
+  } finally {
+    await rm(extracted.extractRoot, { recursive: true, force: true });
+  }
+});
+
+test("packaged artifact resolution supports Linux Electron directories", async () => {
+  const { resolvePackagedLinuxArtifacts } = await import("../scripts/lib/packaged-app.mjs");
+  const appDir = path.join(repoRoot, "dist", "Example-linux-x64");
+  const artifacts = resolvePackagedLinuxArtifacts(appDir);
+  assert.equal(artifacts.platform, "linux");
+  assert.equal(artifacts.asarPath, path.join(appDir, "resources", "app.asar"));
+  assert.equal(artifacts.executablePath, path.join(appDir, "electron"));
 });

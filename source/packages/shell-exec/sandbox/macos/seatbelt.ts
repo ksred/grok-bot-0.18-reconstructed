@@ -31,6 +31,9 @@ export function registerSandboxMetadata(child: ChildProcess, metadata: SandboxMe
 }
 
 export async function captureSandboxDenies(child: ChildProcess): Promise<SandboxDenyEvent[]> {
+  if (process.platform !== "darwin") {
+    return [];
+  }
   const metadata = sandboxMetadataMap.get(child);
   if (!metadata) {
     console.log("No sandbox metadata found on child process");

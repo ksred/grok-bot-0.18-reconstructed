@@ -117,6 +117,8 @@ Remote mode remains the default.
 
 ## Requirements
 
+### macOS packaging
+
 - macOS on Apple Silicon
 - Node.js 26.5.x
 - Xcode Command Line Tools
@@ -124,7 +126,30 @@ Remote mode remains the default.
 - Docker Desktop (optional, only for the local sandbox)
 - local Claude Code or Codex authentication for those router choices
 
+### Linux packaging
+
+- Linux x64 (arm64 support is scaffolded but not yet validated end-to-end)
+- Node.js 26.5.x (see `.node-version`)
+- Git LFS (`git lfs pull` — required so the preserved macOS DMG is available)
+- `p7zip-full` (`7z`) for extracting the checksum-pinned `app.asar` from the research-archive DMG during Linux bootstrap
+- `unzip` for Electron bootstrap extraction
+- Docker (optional, recommended for the local sandbox — works especially well on native Linux hosts)
+
+On a fresh Linux host, `npm run bootstrap` automatically extracts the pinned
+`app.asar` and `app.asar.unpacked` from
+`research-archives/original/0.18.0/macos-arm64/Grok_Bot_0.18.0.dmg` when the
+payload cache is empty. You can still override with:
+
+- `.cache/payload/app.asar` and `.cache/payload/app.asar.unpacked`
+- `GROK_BOT_018_ASAR` (and optionally `GROK_BOT_018_ASAR_UNPACKED`)
+
+The macOS DMG archive is the source of truth for the checksum
+(`6665408168466f9cacc6087e917890c17f59d2e2e9c2404a5c4a59ad79c1de58`). Do not
+change that hash — populate the real payload instead.
+
 ## Quick start
+
+### macOS
 
 ```sh
 git clone <your-repository-url>
@@ -137,6 +162,67 @@ npm run check
 npm run package
 open "dist/Grok Bot 0.18 Reconstructed.app"
 ```
+
+### Linux
+
+```sh
+git clone <your-repository-url>
+cd grok-bot-0.18-reconstructed
+git lfs install
+git lfs pull
+npm ci
+
+# Populate .cache/payload/ from a macOS bootstrap, or set GROK_BOT_018_ASAR.
+# On a fresh clone, git lfs pull is enough — bootstrap extracts from the archived DMG.
+npm run bootstrap
+npm run check
+npm run package:linux
+./dist/Grok\ Bot\ 0.18\ Reconstructed-linux-x64/grok-bot
+```
+
+`npm run package:linux` writes an unpacked directory under `dist/`, a `grok-bot`
+launch wrapper (adds `--disable-gpu` and `--disable-dev-shm-usage` for Linux
+GPU/headless compatibility), and a `.desktop` file with
+`MimeType=x-scheme-handler/sand;`. Register deep links manually when needed:
+
+```sh
+xdg-mime default "Grok Bot 0.18 Reconstructed-linux-x64.desktop" x-scheme-handler/sand
+```
+
+Known Linux limitations:
+
+- no AppImage/deb packaging yet (unpacked directory only);
+- `@anysphere/tree-chunk-napi` and `cursor-proclist` are not available on Linux
+  (Anysphere-internal / macOS-only); reconstructed code degrades gracefully when
+  they are absent;
+- macOS-only integrations (`dist/native/` launchers, WebAuthn signer) remain gated; and
+- inference routing and the local Docker sandbox are the primary validated flows.
+
+### Linux smoke test
+
+After `npm run package:linux`:
+
+```sh
+npm run verify:linux
+npm run smoke:linux
+```
+
+Manual launch:
+
+```sh
+./dist/Grok\ Bot\ 0.18\ Reconstructed-linux-x64/grok-bot
+```
+
+Confirm the original polished UI loads, open **Settings → Router**, and optionally
+toggle **Use local Docker VM** when Docker is available.
+
+Populate the payload cache from a macOS bootstrap when moving machines:
+
+```sh
+GROK_BOT_018_ASAR=/path/to/app.asar npm run payload:populate
+```
+
+### Bootstrap details
 
 `npm run bootstrap` first uses the Git LFS preservation copy of the pinned
 0.18.0 DMG. If that archive is absent, it falls back to the original public URL;
@@ -204,6 +290,10 @@ npm run typecheck         # renderer TypeScript
 npm run source:typecheck  # runtime TypeScript
 npm run frontend:build    # build the readable renderer reconstruction
 npm run package           # build, sign, and verify the macOS app
+npm run package:linux     # build and assemble the Linux unpacked directory
+npm run verify:linux      # verify a packaged Linux directory
+npm run smoke:linux       # bounded Linux launch smoke check
+npm run payload:populate  # copy app.asar payload into .cache/payload
 npm run verify            # verify an existing packaged app
 npm run smoke             # bounded native smoke check
 npm run publication:check # prove a fresh-history export is lossless

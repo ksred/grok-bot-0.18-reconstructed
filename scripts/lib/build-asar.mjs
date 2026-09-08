@@ -10,7 +10,8 @@ import {
   stagedAppDir
 } from "./config.mjs";
 import { packStagedAppWithIntegrity } from "./asar-integrity.mjs";
-import { resolveRuntimeApp } from "./runtime.mjs";
+import { resolveRuntimeApp, getRuntimeUnpackedDistRoot } from "./runtime.mjs";
+import { stageLinuxElectronDeps } from "./stage-linux-electron-deps.mjs";
 
 export const reconstructedUpdaterGuard = [
   "// Reconstructed-build guard: do not consume official update or telemetry services.",
@@ -138,8 +139,7 @@ export async function buildAsar({
   unpackedRoot = builtAsarUnpacked,
 } = {}) {
   const runtimeApp = await resolveRuntimeApp();
-  const resources = path.join(runtimeApp, "Contents", "Resources");
-  const runtimeUnpacked = path.join(resources, "app.asar.unpacked", "dist");
+  const runtimeUnpacked = path.join(getRuntimeUnpackedDistRoot(runtimeApp));
 
   await rm(buildRoot, { recursive: true, force: true });
   await mkdir(buildRoot, { recursive: true });
@@ -157,7 +157,11 @@ export async function buildAsar({
     const source = path.join(runtimeUnpacked, directory);
     const destination = path.join(stageRoot, "dist", directory);
     await rm(destination, { recursive: true, force: true });
-    await cp(source, destination, { recursive: true, dereference: false, preserveTimestamps: true });
+    if (directory === "deps" && process.platform === "linux") {
+      await stageLinuxElectronDeps(source, destination);
+    } else {
+      await cp(source, destination, { recursive: true, dereference: false, preserveTimestamps: true });
+    }
   }
   await stageElectronRuntimeDependencyResolution(path.join(stageRoot, "dist", "deps"));
 
